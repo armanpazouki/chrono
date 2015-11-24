@@ -276,7 +276,10 @@ void function_CalcContactForces(
     // The tangential force is a vector with two parts: one depends on the stored
     // contact history tangential (or shear) displacement vector delta_t, and the
     // other depends on the current relative velocity vector (for viscous damping).
-    real forceN_mag = kn * delta_n - gn * relvel_n_mag;
+	double k1 = 2.617994e+04;
+	double k2 = k1 / 100;
+    real forceN_mag = k1 * delta_n + k2 * pow(delta_n, 3);
+//    real forceN_mag = kn * delta_n - gn * relvel_n_mag;
     real3 forceT_stiff = kt * delta_t;
     real3 forceT_damp = gt * relvel_t;
 
@@ -300,7 +303,7 @@ void function_CalcContactForces(
             break;
         case ChSystemDEM::AdhesionForceModel::DMT:
             // Derjaguin, Muller and Toporov (DMT) adhesion force,
-            forceN_mag -= adhesionMultDMT_eff * Sqrt(eff_radius[index]);
+            forceN_mag -= adhesionMultDMT_eff;// * Sqrt(eff_radius[index]);
             break;
     }
 
