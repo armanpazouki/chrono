@@ -601,6 +601,65 @@ void ChIterativeSolverParallelDEM::ComputeR() {
         -data_manager->host_data.b - data_manager->host_data.D_b_T * data_manager->host_data.M_invk;
 }
 
+void ChIterativeSolverParallelDEM::RunTimeStep_computeForce() {
+    // This is the total number of constraints, note that there are no contacts
+    data_manager->num_constraints = data_manager->num_bilaterals;
+    data_manager->num_unilaterals = 0;
+
+    // Calculate contact forces (impulses) and append them to the body forces
+    data_manager->host_data.ct_body_map.resize(data_manager->num_rigid_bodies);
+    thrust::fill(data_manager->host_data.ct_body_map.begin(), data_manager->host_data.ct_body_map.end(), -1);
+
+    if (data_manager->num_rigid_contacts > 0) {
+        data_manager->system_timer.start("ChIterativeSolverParallelDEM_ProcessContact");
+        ProcessContacts();
+        data_manager->system_timer.stop("ChIterativeSolverParallelDEM_ProcessContact");
+    }
+}
+
+void ChIterativeSolverParallelDEM::RunTimeStep_update() {
+    // Generate the mass matrix and compute M_inv_k
+    ComputeMassMatrix();
+
+    // If there are (bilateral) constraints, calculate Lagrange multipliers.
+    if (data_manager->num_constraints != 0) {
+        data_manager->system_timer.start("ChIterativeSolverParallel_Setup");
+
+        bilateral.Setup(data_manager);
+
+        solver->current_iteration = 0;
+        data_manager->measures.solver.total_iteration = 0;
+        data_manager->measures.solver.maxd_hist.clear();            ////
+        data_manager->measures.solver.maxdeltalambda_hist.clear();  ////  currently not used
+
+        solver->bilateral = &bilateral;
+        solver->Setup(data_manager);
+
+        // Set the initial guess for the iterative solver to zero.
+        data_manager->host_data.gamma.resize(data_manager->num_constraints);
+        data_manager->host_data.gamma.reset();
+
+        // Compute the jacobian matrix, the compliance matrix and the right hand side
+        ComputeD();
+        ComputeE();
+        ComputeR();
+
+        data_manager->system_timer.stop("ChIterativeSolverParallel_Setup");
+
+        // Solve for the Lagrange multipliers associated with bilateral constraints.
+        PerformStabilization();
+    }
+
+    // Update velocity (linear and angular)
+    ComputeImpulses();
+
+    for (int i = 0; i < data_manager->measures.solver.maxd_hist.size(); i++) {
+        AtIterationEnd(data_manager->measures.solver.maxd_hist[i], data_manager->measures.solver.maxdeltalambda_hist[i],
+                       i);
+    }
+    tot_iterations = data_manager->measures.solver.maxd_hist.size();
+}
+
 // -----------------------------------------------------------------------------
 // This is the main function for advancing the system state in time. On entry,
 // geometric contact information is available as calculated by the narrowphase
