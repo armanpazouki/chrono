@@ -190,7 +190,7 @@ void ChSystemParallel::IncrementPosition_DataManager(
 			velocities[index * 6 + 5]);
 
     real4 rotOld = rot_rigid_old[index];
-    ChQuaternion<> moldrot(rotOld.x, rotOld.y, rotOld.z, rotOld.w);
+    ChQuaternion<> moldrot(rotOld.w, rotOld.x, rotOld.y, rotOld.z);
     ChMatrix33<> Amatrix;
     Amatrix.Set_A_quaternion(moldrot);
     ChVector<> newwel_abs = Amatrix * newwel;
@@ -202,9 +202,9 @@ void ChSystemParallel::IncrementPosition_DataManager(
     ChQuaternion<> mnewrot = mdeltarot % moldrot;
     rot_rigid_new[index] = real4(mnewrot.e0, mnewrot.e1, mnewrot.e2, mnewrot.e3);
 
-    bodylist[index]->SetRot(mnewrot);
-
-    bodylist[index]->ComputeGyro(newwel);
+//    bodylist[index]->SetRot(mnewrot);
+//
+//    bodylist[index]->ComputeGyro(newwel);
   }
 }
 
@@ -240,7 +240,7 @@ void ChSystemParallel::RunCollisionUpdate_RK4(DynamicVector<real> & velocities) 
 	(( ChIterativeSolverParallel*)( solver_speed))->RunTimeStep_computeForce();
 	DynamicVector<real> hf0 = data_manager->host_data.hf;
 	IncrementPosition_DataManager(pos_rigid1, rot_rigid1, v0, 0.5 * step); // alternatively v1
-	//	data_manager->host_data.v = v0;
+	//	data_manager->host_data.v = v0; // it is already the case
 	(( ChIterativeSolverParallel*)( solver_speed))->RunTimeStep_update();
 	DynamicVector<real> v1 = data_manager->host_data.v;
 
@@ -307,8 +307,8 @@ int ChSystemParallel::Integrate_Y() {
   // pos = pos0 + dT / 6 * (v0 + 2 * v1 + 2 * v2 + v3)
   // v = v0 + dT / 6 * (a0 + 2 * a1 + 2 * a2 + a3)
   // pos is updated inside RunCollisionUpdate_(Euler/RK4). vel is updated externally
-  RunCollisionUpdate_Euler(velocities1);
-//  RunCollisionUpdate_RK4(velocities1); //pos = pos0 + dT / 6 * (v0 + 2 * v1 + 2 * v2 + v3)
+//  RunCollisionUpdate_Euler(velocities1);
+  RunCollisionUpdate_RK4(velocities1); //pos = pos0 + dT / 6 * (v0 + 2 * v1 + 2 * v2 + v3)
   DynamicVector<real> & velocities2 = data_manager->host_data.v;	  // velocities2 = v0 + 1 / 6 * (a0 + 2 * a1 + 2 * a2 + a3) *dT ; this is needed for velocities update
 
 
@@ -322,26 +322,10 @@ int ChSystemParallel::Integrate_Y() {
 #pragma omp parallel for
   for (int i = 0; i < bodylist.size(); i++) {
     if (data_manager->host_data.active_rigid[i] == true) {
-
-    	// ----------------------
-    	// version 1
-//        bodylist[i]->Variables().Get_qb().SetElement(0, 0, velocities1[i * 6 + 0]);
-//        bodylist[i]->Variables().Get_qb().SetElement(1, 0, velocities1[i * 6 + 1]);
-//        bodylist[i]->Variables().Get_qb().SetElement(2, 0, velocities1[i * 6 + 2]);
-//        bodylist[i]->Variables().Get_qb().SetElement(3, 0, velocities1[i * 6 + 3]);
-//        bodylist[i]->Variables().Get_qb().SetElement(4, 0, velocities1[i * 6 + 4]);
-//        bodylist[i]->Variables().Get_qb().SetElement(5, 0, velocities1[i * 6 + 5]);
-//        bodylist[i]->VariablesQbIncrementPosition(this->GetStep());
-//        pos_pointer[i] = (R3(bodylist[i]->GetPos().x, bodylist[i]->GetPos().y, bodylist[i]->GetPos().z));
-//        rot_pointer[i] =
-//            (R4(bodylist[i]->GetRot().e0, bodylist[i]->GetRot().e1, bodylist[i]->GetRot().e2, bodylist[i]->GetRot().e3));
-
-    	// version 2
       real3 pos = pos_pointer[i];
       real4 rot = rot_pointer[i];
       bodylist[i]->SetPos(ChVector<>(pos.x, pos.y, pos.z));
-      bodylist[i]->SetRot(ChQuaternion<>(rot.x, rot.y, rot.z, rot.w));
-      // ---------------------- !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!1
+      bodylist[i]->SetRot(ChQuaternion<>(rot.w, rot.x, rot.y, rot.z));
 
       bodylist[i]->Variables().Get_qb().SetElement(0, 0, velocities2[i * 6 + 0]);
       bodylist[i]->Variables().Get_qb().SetElement(1, 0, velocities2[i * 6 + 1]);
