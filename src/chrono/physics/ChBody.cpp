@@ -530,6 +530,10 @@ void ChBody::ComputeGyro() {
     gyro = Vcross(Wvel, (variables.GetBodyInertia().Matr_x_Vect(Wvel)));
 }
 
+void ChBody::ComputeGyro(ChVector<> Wvel) {
+    gyro = Vcross(Wvel, (variables.GetBodyInertia().Matr_x_Vect(Wvel)));
+}
+
 bool ChBody::TrySleeping() {
 
     BFlagSet(BF_COULDSLEEP, false);
