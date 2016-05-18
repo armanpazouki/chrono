@@ -202,8 +202,9 @@ void ChSystemParallel::IncrementPosition_DataManager(
     ChQuaternion<> mnewrot = mdeltarot % moldrot;
     rot_rigid_new[index] = real4(mnewrot.e0, mnewrot.e1, mnewrot.e2, mnewrot.e3);
 
-    bodylist[index]->SetWvel_loc(newwel);
-    bodylist[index]->ComputeGyro();
+    bodylist[index]->SetRot(mnewrot);
+
+    bodylist[index]->ComputeGyro(newwel);
   }
 }
 
@@ -217,19 +218,18 @@ void ChSystemParallel::RunCollision() {
 	  data_manager->system_timer.stop("collision");
 }
 
-void ChSystemParallel::RunCollisionUpdate_Euler() {
+void ChSystemParallel::RunCollisionUpdate_Euler(DynamicVector<real> & velocities) {
 	real step = this->step;
 	host_vector<real3> pos_rigid1 = data_manager->host_data.pos_rigid;
 	host_vector<real4> rot_rigid1 = data_manager->host_data.rot_rigid;
 
 	RunCollision();
 	(( ChIterativeSolverParallel*)( solver_speed))->RunTimeStep_computeForce();
-	DynamicVector<real>  v0 = data_manager->host_data.v; // for position update
+	velocities = data_manager->host_data.v; // save original velocity for position update
 	(( ChIterativeSolverParallel*)( solver_speed))->RunTimeStep_update();
-	IncrementPosition_DataManager(pos_rigid1, rot_rigid1, data_manager->host_data.v, step);
 }
 
-void ChSystemParallel::RunCollisionUpdate_RK4() {
+void ChSystemParallel::RunCollisionUpdate_RK4(DynamicVector<real> & velocities) {
 	real step = this->step;
 	host_vector<real3> pos_rigid1 = data_manager->host_data.pos_rigid;
 	host_vector<real4> rot_rigid1 = data_manager->host_data.rot_rigid;
@@ -271,7 +271,7 @@ void ChSystemParallel::RunCollisionUpdate_RK4() {
 	DynamicVector<real> hf3 = data_manager->host_data.hf;
 
 	//-------------------------------------------------
-	DynamicVector<real> vf = v0 * (1.0f / 6.0f) + v1 * (2.0f / 6.0f) + v2 * (2.0f / 6.0f) + v3 * (1.0f / 6.0f);
+	velocities = v0 * (1.0f / 6.0f) + v1 * (2.0f / 6.0f) + v2 * (2.0f / 6.0f) + v3 * (1.0f / 6.0f);
 	DynamicVector<real> hff = hf0 * (1.0f / 6.0f) + hf1 * (2.0f / 6.0f) + hf2 * (2.0f / 6.0f) + hf3 * (1.0f / 6.0f);
 
 	data_manager->host_data.v = v0;
@@ -281,7 +281,6 @@ void ChSystemParallel::RunCollisionUpdate_RK4() {
 
 
 	// update positions. velocity will be updated out of this function
-	IncrementPosition_DataManager(pos_rigid1, rot_rigid1, vf, step);
 }
 
 
@@ -302,30 +301,54 @@ int ChSystemParallel::Integrate_Y() {
   Update();
   data_manager->system_timer.stop("update");
 
+	host_vector<real3> pos_rigid0 = data_manager->host_data.pos_rigid;
+	host_vector<real4> rot_rigid0 = data_manager->host_data.rot_rigid;
+  DynamicVector<real>  velocities1;
   // pos = pos0 + dT / 6 * (v0 + 2 * v1 + 2 * v2 + v3)
   // v = v0 + dT / 6 * (a0 + 2 * a1 + 2 * a2 + a3)
   // pos is updated inside RunCollisionUpdate_(Euler/RK4). vel is updated externally
-  RunCollisionUpdate_Euler();
-//  RunCollisionUpdate_RK4(); //pos = pos0 + dT / 6 * (v0 + 2 * v1 + 2 * v2 + v3)
-  DynamicVector<real> & velocities = data_manager->host_data.v;	  // velocities2 = v0 + 1 / 6 * (a0 + 2 * a1 + 2 * a2 + a3) *dT ; this is needed for velocities update
+  RunCollisionUpdate_Euler(velocities1);
+//  RunCollisionUpdate_RK4(velocities1); //pos = pos0 + dT / 6 * (v0 + 2 * v1 + 2 * v2 + v3)
+  DynamicVector<real> & velocities2 = data_manager->host_data.v;	  // velocities2 = v0 + 1 / 6 * (a0 + 2 * a1 + 2 * a2 + a3) *dT ; this is needed for velocities update
 
 
   data_manager->system_timer.start("update");
 
+	host_vector<real3> & pos_pointer = data_manager->host_data.pos_rigid;
+	host_vector<real4> & rot_pointer = data_manager->host_data.rot_rigid;
+
+  IncrementPosition_DataManager(pos_rigid0, rot_rigid0, velocities1, step);
+
 #pragma omp parallel for
   for (int i = 0; i < bodylist.size(); i++) {
     if (data_manager->host_data.active_rigid[i] == true) {
-      real3 pos = data_manager->host_data.pos_rigid[i];
-      real4 rot = data_manager->host_data.rot_rigid[i];
+
+    	// ----------------------
+    	// version 1
+//        bodylist[i]->Variables().Get_qb().SetElement(0, 0, velocities1[i * 6 + 0]);
+//        bodylist[i]->Variables().Get_qb().SetElement(1, 0, velocities1[i * 6 + 1]);
+//        bodylist[i]->Variables().Get_qb().SetElement(2, 0, velocities1[i * 6 + 2]);
+//        bodylist[i]->Variables().Get_qb().SetElement(3, 0, velocities1[i * 6 + 3]);
+//        bodylist[i]->Variables().Get_qb().SetElement(4, 0, velocities1[i * 6 + 4]);
+//        bodylist[i]->Variables().Get_qb().SetElement(5, 0, velocities1[i * 6 + 5]);
+//        bodylist[i]->VariablesQbIncrementPosition(this->GetStep());
+//        pos_pointer[i] = (R3(bodylist[i]->GetPos().x, bodylist[i]->GetPos().y, bodylist[i]->GetPos().z));
+//        rot_pointer[i] =
+//            (R4(bodylist[i]->GetRot().e0, bodylist[i]->GetRot().e1, bodylist[i]->GetRot().e2, bodylist[i]->GetRot().e3));
+
+    	// version 2
+      real3 pos = pos_pointer[i];
+      real4 rot = rot_pointer[i];
       bodylist[i]->SetPos(ChVector<>(pos.x, pos.y, pos.z));
       bodylist[i]->SetRot(ChQuaternion<>(rot.x, rot.y, rot.z, rot.w));
+      // ---------------------- !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!1
 
-      bodylist[i]->Variables().Get_qb().SetElement(0, 0, velocities[i * 6 + 0]);
-      bodylist[i]->Variables().Get_qb().SetElement(1, 0, velocities[i * 6 + 1]);
-      bodylist[i]->Variables().Get_qb().SetElement(2, 0, velocities[i * 6 + 2]);
-      bodylist[i]->Variables().Get_qb().SetElement(3, 0, velocities[i * 6 + 3]);
-      bodylist[i]->Variables().Get_qb().SetElement(4, 0, velocities[i * 6 + 4]);
-      bodylist[i]->Variables().Get_qb().SetElement(5, 0, velocities[i * 6 + 5]);
+      bodylist[i]->Variables().Get_qb().SetElement(0, 0, velocities2[i * 6 + 0]);
+      bodylist[i]->Variables().Get_qb().SetElement(1, 0, velocities2[i * 6 + 1]);
+      bodylist[i]->Variables().Get_qb().SetElement(2, 0, velocities2[i * 6 + 2]);
+      bodylist[i]->Variables().Get_qb().SetElement(3, 0, velocities2[i * 6 + 3]);
+      bodylist[i]->Variables().Get_qb().SetElement(4, 0, velocities2[i * 6 + 4]);
+      bodylist[i]->Variables().Get_qb().SetElement(5, 0, velocities2[i * 6 + 5]);
       bodylist[i]->VariablesQbSetSpeed(this->GetStep());
 
       bodylist[i]->Update(ChTime);
