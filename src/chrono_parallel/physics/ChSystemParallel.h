@@ -60,6 +60,7 @@ class CH_PARALLEL_API ChSystemParallel : public ChSystem {
   		real dT);
   void RunCollision();
   void RunCollisionUpdate_Euler(DynamicVector<real> & velocities);
+  void RunCollisionUpdate_RK2(DynamicVector<real> & velocities);
   void RunCollisionUpdate_RK4(DynamicVector<real> & velocities);
 
   virtual int Integrate_Y();

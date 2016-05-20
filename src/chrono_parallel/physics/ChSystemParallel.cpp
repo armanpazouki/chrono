@@ -215,14 +215,35 @@ void ChSystemParallel::RunCollision() {
 }
 
 void ChSystemParallel::RunCollisionUpdate_Euler(DynamicVector<real> & velocities) {
-	real step = this->step;
-	host_vector<real3> pos_rigid1 = data_manager->host_data.pos_rigid;
-	host_vector<real4> rot_rigid1 = data_manager->host_data.rot_rigid;
-
 	RunCollision();
 	(( ChIterativeSolverParallel*)( solver_speed))->RunTimeStep_computeForce();
 	velocities = data_manager->host_data.v; // save original velocity for position update
 	(( ChIterativeSolverParallel*)( solver_speed))->RunTimeStep_update();
+}
+
+void ChSystemParallel::RunCollisionUpdate_RK2(DynamicVector<real> & velocities) {
+	real step = this->step;
+	host_vector<real3> pos_rigid1 = data_manager->host_data.pos_rigid;
+	host_vector<real4> rot_rigid1 = data_manager->host_data.rot_rigid;
+
+	DynamicVector<real> v0 = data_manager->host_data.v;
+	this->step = 0.5 * step;
+	RunCollision();
+	(( ChIterativeSolverParallel*)( solver_speed))->RunTimeStep_computeForce();
+	IncrementPosition_DataManager(pos_rigid1, rot_rigid1, v0, 0.5 * step); // alternatively v1
+	//	data_manager->host_data.v = v0; // it is already the case
+	(( ChIterativeSolverParallel*)( solver_speed))->RunTimeStep_update();
+	velocities = data_manager->host_data.v;
+
+
+
+	this->step = step;
+	RunCollision();
+	(( ChIterativeSolverParallel*)( solver_speed))->RunTimeStep_computeForce();
+	data_manager->host_data.v = v0;
+	(( ChIterativeSolverParallel*)( solver_speed))->RunTimeStep_update();
+
+	// update positions. velocity will be updated out of this function
 }
 
 void ChSystemParallel::RunCollisionUpdate_RK4(DynamicVector<real> & velocities) {
@@ -304,6 +325,7 @@ int ChSystemParallel::Integrate_Y() {
   // v = v0 + dT / 6 * (a0 + 2 * a1 + 2 * a2 + a3)
   // pos is updated inside RunCollisionUpdate_(Euler/RK4). vel is updated externally
 //  RunCollisionUpdate_Euler(velocities1);
+//  RunCollisionUpdate_RK2(velocities1);
   RunCollisionUpdate_RK4(velocities1); //pos = pos0 + dT / 6 * (v0 + 2 * v1 + 2 * v2 + v3)
   DynamicVector<real> & velocities2 = data_manager->host_data.v;	  // velocities2 = v0 + 1 / 6 * (a0 + 2 * a1 + 2 * a2 + a3) *dT ; this is needed for velocities update
 
