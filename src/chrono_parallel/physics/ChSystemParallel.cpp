@@ -200,7 +200,7 @@ void ChSystemParallel::IncrementPosition_DataManager(
 
 //    bodylist[index]->SetRot(mnewrot);
 //
-//    bodylist[index]->ComputeGyro(newwel);
+    bodylist[index]->ComputeGyro(newwel);
   }
 }
 
@@ -214,90 +214,123 @@ void ChSystemParallel::RunCollision() {
 	  data_manager->system_timer.stop("collision");
 }
 
-void ChSystemParallel::RunCollisionUpdate_Euler(DynamicVector<real> & velocities) {
+void ChSystemParallel::RunCollisionUpdate_Euler() {
 	RunCollision();
 	(( ChIterativeSolverParallel*)( solver_speed))->RunTimeStep_computeForce();
-	velocities = data_manager->host_data.v; // save original velocity for position update
+	DynamicVector<real> & v0 = data_manager->host_data.v; // pointer, use before RunTimeStep_update
+	IncrementPosition_DataManager(data_manager->host_data.pos_rigid, data_manager->host_data.rot_rigid, v0, step);
 	(( ChIterativeSolverParallel*)( solver_speed))->RunTimeStep_update();
+
 }
 
-void ChSystemParallel::RunCollisionUpdate_RK2(DynamicVector<real> & velocities) {
-	real step = this->step;
+void ChSystemParallel::RunCollisionUpdate_SemiEuler() {
+	RunCollision();
+	(( ChIterativeSolverParallel*)( solver_speed))->RunTimeStep_computeForce();
+	(( ChIterativeSolverParallel*)( solver_speed))->RunTimeStep_update();
+	DynamicVector<real> & v0 = data_manager->host_data.v; // pointer, use before RunTimeStep_update
+	IncrementPosition_DataManager(data_manager->host_data.pos_rigid, data_manager->host_data.rot_rigid, v0, step);
+
+}
+
+void ChSystemParallel::RunCollisionUpdate_RK2() {
+	real mStep = this->step;
 	host_vector<real3> pos_rigid1 = data_manager->host_data.pos_rigid;
 	host_vector<real4> rot_rigid1 = data_manager->host_data.rot_rigid;
+	host_vector<int3> shear_neigh1 = data_manager->host_data.shear_neigh;
+	host_vector<real3> shear_disp1 = data_manager->host_data.shear_disp;
+
 
 	DynamicVector<real> v0 = data_manager->host_data.v;
-	this->step = 0.5 * step;
+	this->step = 0.5 * mStep;
+	Setup();
+	Update();
 	RunCollision();
 	(( ChIterativeSolverParallel*)( solver_speed))->RunTimeStep_computeForce();
-	IncrementPosition_DataManager(pos_rigid1, rot_rigid1, v0, 0.5 * step); // alternatively v1
 	//	data_manager->host_data.v = v0; // it is already the case
+	IncrementPosition_DataManager(pos_rigid1, rot_rigid1, v0, 0.5 * mStep); // alternatively v1
 	(( ChIterativeSolverParallel*)( solver_speed))->RunTimeStep_update();
-	velocities = data_manager->host_data.v;
+	DynamicVector<real> & v1 = data_manager->host_data.v; // pointer, use before RunTimeStep_update
 
-
-
-	this->step = step;
+	this->step = mStep;
+	data_manager->host_data.shear_neigh = shear_neigh1;
+	data_manager->host_data.shear_disp = shear_disp1;
+	Setup();
+	Update();
 	RunCollision();
 	(( ChIterativeSolverParallel*)( solver_speed))->RunTimeStep_computeForce();
+	IncrementPosition_DataManager(pos_rigid1, rot_rigid1, v1, mStep);
 	data_manager->host_data.v = v0;
 	(( ChIterativeSolverParallel*)( solver_speed))->RunTimeStep_update();
 
-	// update positions. velocity will be updated out of this function
 }
 
-void ChSystemParallel::RunCollisionUpdate_RK4(DynamicVector<real> & velocities) {
-	real step = this->step;
+void ChSystemParallel::RunCollisionUpdate_RK4() {
+	real mStep = this->step;
 	host_vector<real3> pos_rigid1 = data_manager->host_data.pos_rigid;
 	host_vector<real4> rot_rigid1 = data_manager->host_data.rot_rigid;
+	host_vector<int3> shear_neigh1 = data_manager->host_data.shear_neigh;
+	host_vector<real3> shear_disp1 = data_manager->host_data.shear_disp;
 
 	DynamicVector<real> v0 = data_manager->host_data.v;
-	this->step = 0.5 * step;
+	this->step = 0.5 * mStep;
+	Setup();
+	Update();
 	RunCollision();
 	(( ChIterativeSolverParallel*)( solver_speed))->RunTimeStep_computeForce();
 	DynamicVector<real> hf0 = data_manager->host_data.hf;
-	IncrementPosition_DataManager(pos_rigid1, rot_rigid1, v0, 0.5 * step); // alternatively v1
+	IncrementPosition_DataManager(pos_rigid1, rot_rigid1, v0, 0.5 * mStep); // alternatively v1
 	//	data_manager->host_data.v = v0; // it is already the case
 	(( ChIterativeSolverParallel*)( solver_speed))->RunTimeStep_update();
 	DynamicVector<real> v1 = data_manager->host_data.v;
 
 
 
-	this->step = 0.5 * step;
+	this->step = 0.5 * mStep;
+	data_manager->host_data.shear_neigh = shear_neigh1;
+	data_manager->host_data.shear_disp = shear_disp1;
+	Setup();
+	Update();
 	RunCollision();
 	(( ChIterativeSolverParallel*)( solver_speed))->RunTimeStep_computeForce();
 	DynamicVector<real> hf1 = data_manager->host_data.hf;
-	IncrementPosition_DataManager(pos_rigid1, rot_rigid1, v1, 0.5 * step);
+	IncrementPosition_DataManager(pos_rigid1, rot_rigid1, v1, 0.5 * mStep);
 	data_manager->host_data.v = v0;
 	(( ChIterativeSolverParallel*)( solver_speed))->RunTimeStep_update();
 	DynamicVector<real> v2 = data_manager->host_data.v;
 
-	this->step = step;
+	this->step = mStep;
+	data_manager->host_data.shear_neigh = shear_neigh1;
+	data_manager->host_data.shear_disp = shear_disp1;
+	Setup();
+	Update();
 	RunCollision();
 	(( ChIterativeSolverParallel*)( solver_speed))->RunTimeStep_computeForce();
 	DynamicVector<real> hf2 = data_manager->host_data.hf;
-	IncrementPosition_DataManager(pos_rigid1, rot_rigid1, v2, step);
+	IncrementPosition_DataManager(pos_rigid1, rot_rigid1, v2, mStep);
 	data_manager->host_data.v = v0;
 	(( ChIterativeSolverParallel*)( solver_speed))->RunTimeStep_update();
 	DynamicVector<real> v3 = data_manager->host_data.v;
 
 
-	this->step = step;
+	this->step = mStep;
+	data_manager->host_data.shear_neigh = shear_neigh1;
+	data_manager->host_data.shear_disp = shear_disp1;
+	Setup();
+	Update();
 	RunCollision();
 	(( ChIterativeSolverParallel*)( solver_speed))->RunTimeStep_computeForce();
 	DynamicVector<real> hf3 = data_manager->host_data.hf;
 
 	//-------------------------------------------------
-	velocities = v0 * (1.0f / 6.0f) + v1 * (2.0f / 6.0f) + v2 * (2.0f / 6.0f) + v3 * (1.0f / 6.0f);
-	DynamicVector<real> hff = hf0 * (1.0f / 6.0f) + hf1 * (2.0f / 6.0f) + hf2 * (2.0f / 6.0f) + hf3 * (1.0f / 6.0f);
+	DynamicVector<real> vf = v0 * (1.0f / 6.0f) + v1 * (2.0f / 6.0f) + v2 * (2.0f / 6.0f) + v3 * (1.0f / 6.0f);
+	DynamicVector<real> hff = 2 * hf0 * (1.0f / 6.0f) + 2 * hf1 * (2.0f / 6.0f) + hf2 * (2.0f / 6.0f) + hf3 * (1.0f / 6.0f); // note: the first two multipliers 2 (in 2 * hf0 , 2 8 hf1) is due to the fact that
+	// hf0 and hf1 are implulses, calculated for dT/2. To get the force, they need to be devided by dT/2, and to get the impulse for the step, they need to be multiplied by dT
 
+	IncrementPosition_DataManager(pos_rigid1, rot_rigid1, vf, mStep);
 	data_manager->host_data.v = v0;
 	data_manager->host_data.hf = hff;
 	(( ChIterativeSolverParallel*)( solver_speed))->RunTimeStep_update();
 
-
-
-	// update positions. velocity will be updated out of this function
 }
 
 
@@ -318,15 +351,13 @@ int ChSystemParallel::Integrate_Y() {
   Update();
   data_manager->system_timer.stop("update");
 
-	host_vector<real3> pos_rigid0 = data_manager->host_data.pos_rigid;
-	host_vector<real4> rot_rigid0 = data_manager->host_data.rot_rigid;
-  DynamicVector<real>  velocities1;
   // pos = pos0 + dT / 6 * (v0 + 2 * v1 + 2 * v2 + v3)
   // v = v0 + dT / 6 * (a0 + 2 * a1 + 2 * a2 + a3)
   // pos is updated inside RunCollisionUpdate_(Euler/RK4). vel is updated externally
-//  RunCollisionUpdate_Euler(velocities1);
-//  RunCollisionUpdate_RK2(velocities1);
-  RunCollisionUpdate_RK4(velocities1); //pos = pos0 + dT / 6 * (v0 + 2 * v1 + 2 * v2 + v3)
+//  RunCollisionUpdate_Euler();
+//  RunCollisionUpdate_SemiEuler();
+  RunCollisionUpdate_RK2();
+//  RunCollisionUpdate_RK4(); //pos = pos0 + dT / 6 * (v0 + 2 * v1 + 2 * v2 + v3)
   DynamicVector<real> & velocities2 = data_manager->host_data.v;	  // velocities2 = v0 + 1 / 6 * (a0 + 2 * a1 + 2 * a2 + a3) *dT ; this is needed for velocities update
 
 
@@ -334,8 +365,6 @@ int ChSystemParallel::Integrate_Y() {
 
 	host_vector<real3> & pos_pointer = data_manager->host_data.pos_rigid;
 	host_vector<real4> & rot_pointer = data_manager->host_data.rot_rigid;
-
-  IncrementPosition_DataManager(pos_rigid0, rot_rigid0, velocities1, step);
 
 #pragma omp parallel for
   for (int i = 0; i < bodylist.size(); i++) {
