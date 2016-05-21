@@ -330,6 +330,9 @@ void ChSystemParallel::RunCollisionUpdate_RK4() {
 	DynamicVector<real> hff = 2 * hf0 * (1.0f / 6.0f) + 2 * hf1 * (2.0f / 6.0f) + hf2 * (2.0f / 6.0f) + hf3 * (1.0f / 6.0f); // note: the first two multipliers 2 (in 2 * hf0 , 2 8 hf1) is due to the fact that
 	// hf0 and hf1 are implulses, calculated for dT/2. To get the force, they need to be devided by dT/2, and to get the impulse for the step, they need to be multiplied by dT
 
+
+	  // pos = pos0 + dT / 6 * (v0 + 2 * v1 + 2 * v2 + v3)
+	  // v = v0 + dT / 6 * (a0 + 2 * a1 + 2 * a2 + a3)
 	IncrementPosition_DataManager(pos_rigid1, rot_rigid1, vf, mStep);
 	data_manager->host_data.v = v0;
 	data_manager->host_data.hf = hff;
@@ -355,13 +358,25 @@ int ChSystemParallel::Integrate_Y() {
   Update();
   data_manager->system_timer.stop("update");
 
-  // pos = pos0 + dT / 6 * (v0 + 2 * v1 + 2 * v2 + v3)
-  // v = v0 + dT / 6 * (a0 + 2 * a1 + 2 * a2 + a3)
-  // pos is updated inside RunCollisionUpdate_(Euler/RK4). vel is updated externally
-//  RunCollisionUpdate_Euler();
-//  RunCollisionUpdate_SemiEuler();
-  RunCollisionUpdate_RK2();
-//  RunCollisionUpdate_RK4(); //pos = pos0 + dT / 6 * (v0 + 2 * v1 + 2 * v2 + v3)
+
+  switch (this->GetIntegrationType()) {
+  case ChSystem::INT_EULER_EXPLICIT:
+	  RunCollisionUpdate_Euler();
+	  break;
+  case ChSystem::INT_EULER_IMPLICIT:
+	  RunCollisionUpdate_SemiEuler();
+	  break;
+  case ChSystem::INT_CUSTOM__:
+	  RunCollisionUpdate_RK2();
+	  break;
+  case ChSystem::INT_RUNGEKUTTA45:
+	  RunCollisionUpdate_RK4();
+	  break;
+  default:
+	  RunCollisionUpdate_SemiEuler();
+	  break;
+  }
+
   DynamicVector<real> & velocities2 = data_manager->host_data.v;	  // velocities2 = v0 + 1 / 6 * (a0 + 2 * a1 + 2 * a2 + a3) *dT ; this is needed for velocities update
 
 
