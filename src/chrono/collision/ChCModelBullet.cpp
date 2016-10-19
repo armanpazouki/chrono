@@ -197,6 +197,7 @@ bool ChModelBullet::AddEllipsoid(double rx, double ry, double rz, const ChVector
 bool ChModelBullet::AddBox(double hx, double hy, double hz, const ChVector<>& pos, const ChMatrix33<>& rot) {
     // adjust default inward margin (if object too thin)
     this->SetSafeMargin(ChMin(this->GetSafeMargin(), 0.2 * ChMin(ChMin(hx, hy), hz)));
+	
 
     btScalar ahx = (btScalar)(hx + this->GetEnvelope());
     btScalar ahy = (btScalar)(hy + this->GetEnvelope());
@@ -204,7 +205,7 @@ bool ChModelBullet::AddBox(double hx, double hy, double hz, const ChVector<>& po
     btBoxShape* mshape = new btBoxShape(btVector3(ahx, ahy, ahz));
 
     mshape->setMargin((btScalar) this->GetSuggestedFullMargin());
-
+	printf("margin box %e full margin %e\n", this->GetSafeMargin(), this->GetSuggestedFullMargin());
     _injectShape(pos, rot, mshape);
 
     return true;
@@ -213,14 +214,14 @@ bool ChModelBullet::AddBox(double hx, double hy, double hz, const ChVector<>& po
 /// Add a cylinder to this model (default axis on Y direction), for collision purposes
 bool ChModelBullet::AddCylinder(double rx, double rz, double hy, const ChVector<>& pos, const ChMatrix33<>& rot) {
     // adjust default inward margin (if object too thin)
-    this->SetSafeMargin(ChMin(this->GetSafeMargin(), 0.2 * ChMin(ChMin(rx, rz), 0.5 * hy)));
+    this->SetSafeMargin(0);
 
     btScalar arx = (btScalar)(rx + this->GetEnvelope());
     btScalar arz = (btScalar)(rz + this->GetEnvelope());
     btScalar ahy = (btScalar)(hy + this->GetEnvelope());
-    btCylinderShape* mshape = new btCylinderShape(btVector3(arx, ahy, arz));
+	btCapsuleShape* mshape = new btCapsuleShape(rx - this->GetEnvelope(), arz);
 
-    mshape->setMargin((btScalar) this->GetSuggestedFullMargin());
+    mshape->setMargin((btScalar) 0);
 
     _injectShape(pos, rot, mshape);
 
