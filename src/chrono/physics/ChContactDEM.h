@@ -268,9 +268,8 @@ class ChContactDEM : public ChContactTuple<Ta, Tb> {
 				}
 
 				// Coulomb law
-				printf("mu_eff %e, kt %e \n", mat.mu_eff, kt);
 				double forceT_viscouse = mat.mu_eff * forceN;// mat.mu_eff * std::tanh(5.0 * relvel_t_mag) * forceN;
-				forceT = forceT_viscouse;// std::min<double>(forceT, forceT_viscouse);
+				forceT = std::min<double>(forceT, forceT_viscouse);
 
 				// Accumulate normal and tangential forces
 				ChVector<> force = forceN * normal_dir;
