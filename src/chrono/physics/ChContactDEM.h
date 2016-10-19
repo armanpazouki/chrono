@@ -239,6 +239,44 @@ class ChContactDEM : public ChContactTuple<Ta, Tb> {
 
                     return force;
                 }
+
+			case ChSystemDEM::Coulomb:
+				if (use_mat_props) {
+					double sqrt_Rd = std::sqrt(delta);
+					double Sn = 2 * mat.E_eff * sqrt_Rd;
+					double St = 8 * mat.G_eff * sqrt_Rd;
+					double loge = (mat.cr_eff < CH_MICROTOL) ? std::log(CH_MICROTOL) : std::log(mat.cr_eff);
+					double beta = loge / std::sqrt(loge * loge + CH_C_PI * CH_C_PI);
+					kn = (2.0 / 3) * Sn;
+					gn = -2 * std::sqrt(5.0 / 6) * beta * std::sqrt(Sn * m_eff);
+				}
+				else {
+					double tmp = std::sqrt(delta);
+					kn = tmp * mat.kn;
+					gn = tmp * mat.gn;
+				}
+
+				kt = 2.0 / 7 * kn;
+				gt = 0;
+
+				double forceN = kn * delta - gn * relvel_n_mag;
+				double delta_t = relvel_t_mag * dT;
+				double forceT = kt * delta_t + gt * relvel_t_mag;
+				if (forceN < 0) {
+					forceN = 0;
+					forceT = 0;
+				}
+
+				// Coulomb law
+				printf("mu_eff %e, kt %e \n", mat.mu_eff, kt);
+				double forceT_viscouse = mat.mu_eff * forceN;// mat.mu_eff * std::tanh(5.0 * relvel_t_mag) * forceN;
+				forceT = forceT_viscouse;// std::min<double>(forceT, forceT_viscouse);
+
+				// Accumulate normal and tangential forces
+				ChVector<> force = forceN * normal_dir;
+				force -= (forceT / relvel_t_mag) * relvel_t;
+
+				return force;
         }
 
         // Tangential displacement (magnitude)
