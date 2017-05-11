@@ -71,6 +71,188 @@ ChSystemParallel::~ChSystemParallel() {
     delete data_manager;
 }
 
+void ChSystemParallel::IncrementPosition_DataManager(
+	const custom_vector<real3> & pos_rigid_old,
+	const custom_vector<quaternion> & rot_rigid_old,
+	DynamicVector<real>& velocities,
+	real dT) {
+	custom_vector<real3> & pos_rigid_new = data_manager->host_data.pos_rigid;
+	custom_vector<quaternion> & rot_rigid_new = data_manager->host_data.rot_rigid;
+#pragma omp parallel for
+	for (int index = 0; index < bodylist.size(); index++) {
+		if (!data_manager->host_data.active_rigid[index])
+			continue;
+
+		// Updates position with incremental action of speed contained in the
+		// 'qb' vector:  pos' = pos + dt * speed   , like in an Eulero step.
+
+		real3 newspeed = real3(
+			velocities[index * 6 + 0],
+			velocities[index * 6 + 1],
+			velocities[index * 6 + 2]);
+
+		real3 posNew = pos_rigid_old[index] + newspeed * dT;
+		pos_rigid_new[index] = posNew;
+
+		ChVector<> newwel = ChVector<>(
+			velocities[index * 6 + 3],
+			velocities[index * 6 + 4],
+			velocities[index * 6 + 5]);
+
+		quaternion rotOld = rot_rigid_old[index];
+		ChQuaternion<> moldrot(rotOld.w, rotOld.x, rotOld.y, rotOld.z);
+		ChMatrix33<> Amatrix;
+		Amatrix.Set_A_quaternion(moldrot);
+		ChVector<> newwel_abs = Amatrix * newwel;
+
+		double mangle = newwel_abs.Length() * dT;
+		newwel_abs.Normalize();
+		ChQuaternion<> mdeltarot;
+		mdeltarot.Q_from_AngAxis(mangle, newwel_abs);
+		ChQuaternion<> mnewrot = mdeltarot % moldrot;
+		rot_rigid_new[index] = quaternion(mnewrot.e0(), mnewrot.e1(), mnewrot.e2(), mnewrot.e3());
+
+		//    bodylist[index]->SetRot(mnewrot);
+		//
+		bodylist[index]->ComputeGyro(newwel);
+	}
+}
+
+void ChSystemParallel::RunCollision() {
+	data_manager->system_timer.start("collision");
+	collision_system->Run();
+	collision_system->ReportContacts(this->contact_container.get());
+
+	for (size_t ic = 0; ic < collision_callbacks.size(); ic++) {
+		collision_callbacks[ic]->OnCustomCollision(this);
+	}
+
+	data_manager->system_timer.stop("collision");
+}
+
+
+void ChSystemParallel::RunCollisionUpdate_Euler() {
+	RunCollision();
+	std::static_pointer_cast<ChIterativeSolverParallel>(solver_speed)->RunTimeStep_computeForce();
+	DynamicVector<real> & v0 = data_manager->host_data.v; // pointer, use before RunTimeStep_update
+	IncrementPosition_DataManager(data_manager->host_data.pos_rigid, data_manager->host_data.rot_rigid, v0, step);
+	std::static_pointer_cast<ChIterativeSolverParallel>(solver_speed)->RunTimeStep_update();
+
+}
+
+void ChSystemParallel::RunCollisionUpdate_SemiEuler() {
+	RunCollision();
+	std::static_pointer_cast<ChIterativeSolverParallel>(solver_speed)->RunTimeStep_computeForce();
+	std::static_pointer_cast<ChIterativeSolverParallel>(solver_speed)->RunTimeStep_update();
+	DynamicVector<real> & v0 = data_manager->host_data.v; // pointer, use before RunTimeStep_update
+	IncrementPosition_DataManager(data_manager->host_data.pos_rigid, data_manager->host_data.rot_rigid, v0, step);
+
+}
+
+void ChSystemParallel::RunCollisionUpdate_RK2() {
+	real mStep = this->step;
+	custom_vector<real3> pos_rigid1 = data_manager->host_data.pos_rigid;
+	custom_vector<quaternion> rot_rigid1 = data_manager->host_data.rot_rigid;
+	custom_vector<vec3> shear_neigh1 = data_manager->host_data.shear_neigh;
+	custom_vector<real3> shear_disp1 = data_manager->host_data.shear_disp;
+
+
+	DynamicVector<real> v0 = data_manager->host_data.v;
+	this->step = 0.5 * mStep;
+	Setup();
+	Update();
+	RunCollision();
+	std::static_pointer_cast<ChIterativeSolverParallel>(solver_speed)->RunTimeStep_computeForce();
+	//	data_manager->host_data.v = v0; // it is already the case
+	IncrementPosition_DataManager(pos_rigid1, rot_rigid1, v0, 0.5 * mStep); // alternatively v1
+	std::static_pointer_cast<ChIterativeSolverParallel>(solver_speed)->RunTimeStep_update();
+	DynamicVector<real> & v1 = data_manager->host_data.v; // pointer, use before RunTimeStep_update
+
+	this->step = mStep;
+	data_manager->host_data.shear_neigh = shear_neigh1;
+	data_manager->host_data.shear_disp = shear_disp1;
+	Setup();
+	Update();
+	RunCollision();
+	std::static_pointer_cast<ChIterativeSolverParallel>(solver_speed)->RunTimeStep_computeForce();
+	IncrementPosition_DataManager(pos_rigid1, rot_rigid1, v1, mStep);
+	data_manager->host_data.v = v0;
+	std::static_pointer_cast<ChIterativeSolverParallel>(solver_speed)->RunTimeStep_update();
+}
+
+void ChSystemParallel::RunCollisionUpdate_RK4() {
+	real mStep = this->step;
+	custom_vector<real3> pos_rigid1 = data_manager->host_data.pos_rigid;
+	custom_vector<quaternion> rot_rigid1 = data_manager->host_data.rot_rigid;
+	custom_vector<vec3> shear_neigh1 = data_manager->host_data.shear_neigh;
+	custom_vector<real3> shear_disp1 = data_manager->host_data.shear_disp;
+
+	DynamicVector<real> v0 = data_manager->host_data.v;
+	this->step = 0.5 * mStep;
+	Setup();
+	Update();
+	RunCollision();
+	std::static_pointer_cast<ChIterativeSolverParallel>(solver_speed)->RunTimeStep_computeForce();
+	DynamicVector<real> hf0 = data_manager->host_data.hf;
+	IncrementPosition_DataManager(pos_rigid1, rot_rigid1, v0, 0.5 * mStep); // alternatively v1
+	//	data_manager->host_data.v = v0; // it is already the case
+	std::static_pointer_cast<ChIterativeSolverParallel>(solver_speed)->RunTimeStep_update();
+	DynamicVector<real> v1 = data_manager->host_data.v;
+
+
+
+	this->step = 0.5 * mStep;
+	data_manager->host_data.shear_neigh = shear_neigh1;
+	data_manager->host_data.shear_disp = shear_disp1;
+	Setup();
+	Update();
+	RunCollision();
+	std::static_pointer_cast<ChIterativeSolverParallel>(solver_speed)->RunTimeStep_computeForce();
+	DynamicVector<real> hf1 = data_manager->host_data.hf;
+	IncrementPosition_DataManager(pos_rigid1, rot_rigid1, v1, 0.5 * mStep);
+	data_manager->host_data.v = v0;
+	std::static_pointer_cast<ChIterativeSolverParallel>(solver_speed)->RunTimeStep_update();
+	DynamicVector<real> v2 = data_manager->host_data.v;
+
+	this->step = mStep;
+	data_manager->host_data.shear_neigh = shear_neigh1;
+	data_manager->host_data.shear_disp = shear_disp1;
+	Setup();
+	Update();
+	RunCollision();
+	std::static_pointer_cast<ChIterativeSolverParallel>(solver_speed)->RunTimeStep_computeForce();
+	DynamicVector<real> hf2 = data_manager->host_data.hf;
+	IncrementPosition_DataManager(pos_rigid1, rot_rigid1, v2, mStep);
+	data_manager->host_data.v = v0;
+	std::static_pointer_cast<ChIterativeSolverParallel>(solver_speed)->RunTimeStep_update();
+	DynamicVector<real> v3 = data_manager->host_data.v;
+
+
+	this->step = mStep;
+	data_manager->host_data.shear_neigh = shear_neigh1;
+	data_manager->host_data.shear_disp = shear_disp1;
+	Setup();
+	Update();
+	RunCollision();
+	std::static_pointer_cast<ChIterativeSolverParallel>(solver_speed)->RunTimeStep_computeForce();
+	DynamicVector<real> hf3 = data_manager->host_data.hf;
+
+	//-------------------------------------------------
+	DynamicVector<real> vf = v0 * (1.0f / 6.0f) + v1 * (2.0f / 6.0f) + v2 * (2.0f / 6.0f) + v3 * (1.0f / 6.0f);
+	DynamicVector<real> hff = 2 * hf0 * (1.0f / 6.0f) + 2 * hf1 * (2.0f / 6.0f) + hf2 * (2.0f / 6.0f) + hf3 * (1.0f / 6.0f); // note: the first two multipliers 2 (in 2 * hf0 , 2 8 hf1) is due to the fact that
+	// hf0 and hf1 are implulses, calculated for dT/2. To get the force, they need to be devided by dT/2, and to get the impulse for the step, they need to be multiplied by dT
+
+
+	// pos = pos0 + dT / 6 * (v0 + 2 * v1 + 2 * v2 + v3)
+	// v = v0 + dT / 6 * (a0 + 2 * a1 + 2 * a2 + a3)
+	IncrementPosition_DataManager(pos_rigid1, rot_rigid1, vf, mStep);
+	data_manager->host_data.v = v0;
+	data_manager->host_data.hf = hff;
+	std::static_pointer_cast<ChIterativeSolverParallel>(solver_speed)->RunTimeStep_update();
+
+}
+
+
 bool ChSystemParallel::Integrate_Y() {
     LOG(INFO) << "ChSystemParallel::Integrate_Y() Time: " << ChTime;
     // Get the pointer for the system descriptor and store it into the data manager
@@ -88,39 +270,46 @@ bool ChSystemParallel::Integrate_Y() {
     Update();
     data_manager->system_timer.stop("update");
 
-    data_manager->system_timer.start("collision");
-    collision_system->Run();
-    collision_system->ReportContacts(this->contact_container.get());
-
-    for (size_t ic = 0; ic < collision_callbacks.size(); ic++) {
-        collision_callbacks[ic]->OnCustomCollision(this);
-    }
-
-    data_manager->system_timer.stop("collision");
-
     data_manager->system_timer.start("solver");
-    std::static_pointer_cast<ChIterativeSolverParallel>(solver_speed)->RunTimeStep();
-    data_manager->system_timer.stop("solver");
+	switch (this->GetTimestepperType()) {
+	case ChTimestepper::Type::EULER_EXPLICIT:
+		RunCollisionUpdate_Euler();
+		break;
+	case ChTimestepper::Type::EULER_IMPLICIT :
+		RunCollisionUpdate_SemiEuler();
+		break;
+	case ChTimestepper::Type::TRAPEZOIDAL: // RK2
+		RunCollisionUpdate_RK2();
+		break;
+	case ChTimestepper::Type::RUNGEKUTTA45:
+		RunCollisionUpdate_RK4();
+		break;
+	default:
+		RunCollisionUpdate_SemiEuler();
+		break;
+	}    data_manager->system_timer.stop("solver");
 
     data_manager->system_timer.start("update");
 
-    // Iterate over the active bilateral constraints and store their Lagrange
-    // multiplier.
-    std::vector<ChConstraint*>& mconstraints = descriptor->GetConstraintsList();
-    for (int index = 0; index < (signed)data_manager->num_bilaterals; index++) {
-        int cntr = data_manager->host_data.bilateral_mapping[index];
-        mconstraints[cntr]->Set_l_i(data_manager->host_data.gamma[data_manager->num_unilaterals + index]);
-    }
+	//// delete a1
+    //// Iterate over the active bilateral constraints and store their Lagrange
+    //// multiplier.
+    //std::vector<ChConstraint*>& mconstraints = descriptor->GetConstraintsList();
+    //for (int index = 0; index < (signed)data_manager->num_bilaterals; index++) {
+    //    int cntr = data_manager->host_data.bilateral_mapping[index];
+    //    mconstraints[cntr]->Set_l_i(data_manager->host_data.gamma[data_manager->num_unilaterals + index]);
+    //}
 
-    // Update the constraint reactions.
-    double factor = 1 / this->GetStep();
-    for (int ip = 0; ip < linklist.size(); ++ip) {
-        linklist[ip]->ConstraintsFetch_react(factor);
-    }
-    for (int ip = 0; ip < otherphysicslist.size(); ++ip) {
-        otherphysicslist[ip]->ConstraintsFetch_react(factor);
-    }
-    contact_container->ConstraintsFetch_react(factor);
+    //// Update the constraint reactions.
+    //double factor = 1 / this->GetStep();
+    //for (int ip = 0; ip < linklist.size(); ++ip) {
+    //    linklist[ip]->ConstraintsFetch_react(factor);
+    //}
+    //for (int ip = 0; ip < otherphysicslist.size(); ++ip) {
+    //    otherphysicslist[ip]->ConstraintsFetch_react(factor);
+    //}
+    //contact_container->ConstraintsFetch_react(factor);
+	//// delete a2
 
     // Scatter the states to the Chrono objects (bodies and shafts) and update
     // all physics items at the end of the step.
@@ -144,29 +333,33 @@ bool ChSystemParallel::Integrate_Y() {
             bodylist[i]->Update(ChTime);
 
             // update the position and rotation vectors
-            pos_pointer[i] = (real3(bodylist[i]->GetPos().x(), bodylist[i]->GetPos().y(), bodylist[i]->GetPos().z()));
-            rot_pointer[i] = (quaternion(bodylist[i]->GetRot().e0(), bodylist[i]->GetRot().e1(),
-                                         bodylist[i]->GetRot().e2(), bodylist[i]->GetRot().e3()));
+			//// delete a1
+            //pos_pointer[i] = (real3(bodylist[i]->GetPos().x(), bodylist[i]->GetPos().y(), bodylist[i]->GetPos().z()));
+            //rot_pointer[i] = (quaternion(bodylist[i]->GetRot().e0(), bodylist[i]->GetRot().e1(),
+            //                             bodylist[i]->GetRot().e2(), bodylist[i]->GetRot().e3()));
+			//// delete a2
         }
     }
 
     ////#pragma omp parallel for
-    for (int i = 0; i < (signed)data_manager->num_shafts; i++) {
-        if (!data_manager->host_data.shaft_active[i])
-            continue;
+	//// delete a1
+    //for (int i = 0; i < (signed)data_manager->num_shafts; i++) {
+    //    if (!data_manager->host_data.shaft_active[i])
+    //        continue;
 
-        shaftlist[i]->Variables().Get_qb().SetElementN(0, velocities[data_manager->num_rigid_bodies * 6 + i]);
-        shaftlist[i]->VariablesQbIncrementPosition(GetStep());
-        shaftlist[i]->VariablesQbSetSpeed(GetStep());
-        shaftlist[i]->Update(ChTime);
-    }
+    //    shaftlist[i]->Variables().Get_qb().SetElementN(0, velocities[data_manager->num_rigid_bodies * 6 + i]);
+    //    shaftlist[i]->VariablesQbIncrementPosition(GetStep());
+    //    shaftlist[i]->VariablesQbSetSpeed(GetStep());
+    //    shaftlist[i]->Update(ChTime);
+    //}
 
-    for (int i = 0; i < otherphysicslist.size(); i++) {
-        otherphysicslist[i]->Update(ChTime);
-    }
+    //for (int i = 0; i < otherphysicslist.size(); i++) {
+    //    otherphysicslist[i]->Update(ChTime);
+    //}
 
-    data_manager->node_container->UpdatePosition(ChTime);
-    data_manager->fea_container->UpdatePosition(ChTime);
+    //data_manager->node_container->UpdatePosition(ChTime);
+    //data_manager->fea_container->UpdatePosition(ChTime);
+	//// delete a2
     data_manager->system_timer.stop("update");
 
     //=============================================================================================
@@ -177,6 +370,115 @@ bool ChSystemParallel::Integrate_Y() {
     }
 
     return true;
+}
+
+// a copy of the original integrator
+bool ChSystemParallel::Integrate_Y0() {
+	LOG(INFO) << "ChSystemParallel::Integrate_Y() Time: " << ChTime;
+	// Get the pointer for the system descriptor and store it into the data manager
+	data_manager->system_descriptor = this->descriptor;
+	data_manager->body_list = &this->bodylist;
+	data_manager->link_list = &this->linklist;
+	data_manager->other_physics_list = &this->otherphysicslist;
+
+	data_manager->system_timer.Reset();
+	data_manager->system_timer.start("step");
+
+	Setup();
+
+	data_manager->system_timer.start("update");
+	Update();
+	data_manager->system_timer.stop("update");
+
+	data_manager->system_timer.start("collision");
+	collision_system->Run();
+	collision_system->ReportContacts(this->contact_container.get());
+
+	for (size_t ic = 0; ic < collision_callbacks.size(); ic++) {
+		collision_callbacks[ic]->OnCustomCollision(this);
+	}
+
+	data_manager->system_timer.stop("collision");
+
+	data_manager->system_timer.start("solver");
+	std::static_pointer_cast<ChIterativeSolverParallel>(solver_speed)->RunTimeStep();
+	data_manager->system_timer.stop("solver");
+
+	data_manager->system_timer.start("update");
+
+	// Iterate over the active bilateral constraints and store their Lagrange
+	// multiplier.
+	std::vector<ChConstraint*>& mconstraints = descriptor->GetConstraintsList();
+	for (int index = 0; index < (signed)data_manager->num_bilaterals; index++) {
+		int cntr = data_manager->host_data.bilateral_mapping[index];
+		mconstraints[cntr]->Set_l_i(data_manager->host_data.gamma[data_manager->num_unilaterals + index]);
+	}
+
+	// Update the constraint reactions.
+	double factor = 1 / this->GetStep();
+	for (int ip = 0; ip < linklist.size(); ++ip) {
+		linklist[ip]->ConstraintsFetch_react(factor);
+	}
+	for (int ip = 0; ip < otherphysicslist.size(); ++ip) {
+		otherphysicslist[ip]->ConstraintsFetch_react(factor);
+	}
+	contact_container->ConstraintsFetch_react(factor);
+
+	// Scatter the states to the Chrono objects (bodies and shafts) and update
+	// all physics items at the end of the step.
+	DynamicVector<real>& velocities = data_manager->host_data.v;
+	custom_vector<real3>& pos_pointer = data_manager->host_data.pos_rigid;
+	custom_vector<quaternion>& rot_pointer = data_manager->host_data.rot_rigid;
+
+#pragma omp parallel for
+	for (int i = 0; i < bodylist.size(); i++) {
+		if (data_manager->host_data.active_rigid[i] != 0) {
+			bodylist[i]->Variables().Get_qb().SetElement(0, 0, velocities[i * 6 + 0]);
+			bodylist[i]->Variables().Get_qb().SetElement(1, 0, velocities[i * 6 + 1]);
+			bodylist[i]->Variables().Get_qb().SetElement(2, 0, velocities[i * 6 + 2]);
+			bodylist[i]->Variables().Get_qb().SetElement(3, 0, velocities[i * 6 + 3]);
+			bodylist[i]->Variables().Get_qb().SetElement(4, 0, velocities[i * 6 + 4]);
+			bodylist[i]->Variables().Get_qb().SetElement(5, 0, velocities[i * 6 + 5]);
+
+			bodylist[i]->VariablesQbIncrementPosition(this->GetStep());
+			bodylist[i]->VariablesQbSetSpeed(this->GetStep());
+
+			bodylist[i]->Update(ChTime);
+
+			// update the position and rotation vectors
+			pos_pointer[i] = (real3(bodylist[i]->GetPos().x(), bodylist[i]->GetPos().y(), bodylist[i]->GetPos().z()));
+			rot_pointer[i] = (quaternion(bodylist[i]->GetRot().e0(), bodylist[i]->GetRot().e1(),
+				bodylist[i]->GetRot().e2(), bodylist[i]->GetRot().e3()));
+		}
+	}
+
+	////#pragma omp parallel for
+	for (int i = 0; i < (signed)data_manager->num_shafts; i++) {
+		if (!data_manager->host_data.shaft_active[i])
+			continue;
+
+		shaftlist[i]->Variables().Get_qb().SetElementN(0, velocities[data_manager->num_rigid_bodies * 6 + i]);
+		shaftlist[i]->VariablesQbIncrementPosition(GetStep());
+		shaftlist[i]->VariablesQbSetSpeed(GetStep());
+		shaftlist[i]->Update(ChTime);
+	}
+
+	for (int i = 0; i < otherphysicslist.size(); i++) {
+		otherphysicslist[i]->Update(ChTime);
+	}
+
+	data_manager->node_container->UpdatePosition(ChTime);
+	data_manager->fea_container->UpdatePosition(ChTime);
+	data_manager->system_timer.stop("update");
+
+	//=============================================================================================
+	ChTime += GetStep();
+	data_manager->system_timer.stop("step");
+	if (data_manager->settings.perform_thread_tuning) {
+		RecomputeThreads();
+	}
+
+	return true;
 }
 
 //

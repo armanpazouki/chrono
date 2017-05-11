@@ -697,6 +697,67 @@ void ChIterativeSolverParallelSMC::RunTimeStep() {
     tot_iterations = (int)data_manager->measures.solver.maxd_hist.size();
 }
 
+void ChIterativeSolverParallelSMC::RunTimeStep_computeForce() {
+	// This is the total number of constraints, note that there are no contacts
+	data_manager->num_constraints = data_manager->num_bilaterals;
+	data_manager->num_unilaterals = 0;
+
+	// Calculate contact forces (impulses) and append them to the body forces
+	data_manager->host_data.ct_body_map.resize(data_manager->num_rigid_bodies);
+	Thrust_Fill(data_manager->host_data.ct_body_map, -1);
+
+	if (data_manager->num_rigid_contacts > 0) {
+		data_manager->system_timer.start("ChIterativeSolverParallelSMC_ProcessContact");
+		ProcessContacts();
+		data_manager->system_timer.stop("ChIterativeSolverParallelSMC_ProcessContact");
+	}
+}
+
+void ChIterativeSolverParallelSMC::RunTimeStep_update() {
+	// Generate the mass matrix and compute M_inv_k
+	ComputeInvMassMatrix();
+
+	// If there are (bilateral) constraints, calculate Lagrange multipliers.
+	if (data_manager->num_constraints != 0) {
+		data_manager->system_timer.start("ChIterativeSolverParallel_Setup");
+
+		data_manager->bilateral->Setup(data_manager);
+
+		solver->current_iteration = 0;
+		data_manager->measures.solver.total_iteration = 0;
+		data_manager->measures.solver.maxd_hist.clear();            ////
+		data_manager->measures.solver.maxdeltalambda_hist.clear();  ////  currently not used
+
+		solver->Setup(data_manager);
+
+		// Set the initial guess for the iterative solver to zero.
+		data_manager->host_data.gamma.resize(data_manager->num_constraints);
+		data_manager->host_data.gamma.reset();
+
+		// Compute the jacobian matrix, the compliance matrix and the right hand side
+		ComputeD();
+		ComputeE();
+		ComputeR();
+
+		data_manager->system_timer.stop("ChIterativeSolverParallel_Setup");
+
+		ShurProductBilateral.Setup(data_manager);
+
+		bilateral_solver->Setup(data_manager);
+		// Solve for the Lagrange multipliers associated with bilateral constraints.
+		PerformStabilization();
+	}
+
+	// Update velocity (linear and angular)
+	ComputeImpulses();
+
+	for (int i = 0; i < data_manager->measures.solver.maxd_hist.size(); i++) {
+		AtIterationEnd(data_manager->measures.solver.maxd_hist[i], data_manager->measures.solver.maxdeltalambda_hist[i],
+			i);
+	}
+	tot_iterations = (int)data_manager->measures.solver.maxd_hist.size();
+}
+
 void ChIterativeSolverParallelSMC::ComputeImpulses() {
     DynamicVector<real>& v = data_manager->host_data.v;
     const DynamicVector<real>& M_invk = data_manager->host_data.M_invk;

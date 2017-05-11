@@ -521,6 +521,7 @@ class ChApi ChBody : public ChPhysicsItem, public ChBodyFrame, public ChContacta
     /// SetCoord() or SetCoord_dt() etc. is called, but only if necessary,
     /// for each UpdateState().
     void ComputeGyro();
+	void ComputeGyro(ChVector<> Wvel);
 
     /// Transform and adds a cartesian force to a generic 7x1 vector of body lagrangian forces mQf .
     /// The carthesian force must be passed as vector and application point, and vcan be either in local

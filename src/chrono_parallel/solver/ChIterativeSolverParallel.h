@@ -39,6 +39,9 @@ class CH_PARALLEL_API ChIterativeSolverParallel : public ChIterativeSolver {
     virtual double Solve(ChSystemDescriptor& sysd) { return 0; }
     ///< Similarly, the run timestep function needs to be defined
     virtual void RunTimeStep() = 0;
+	virtual void RunTimeStep_computeForce() = 0;
+	virtual void RunTimeStep_update() = 0;
+
     ///< This function computes the new velocities based on the lagrange multipliers
     virtual void ComputeImpulses() = 0;
 
@@ -68,6 +71,8 @@ class CH_PARALLEL_API ChIterativeSolverParallelNSC : public ChIterativeSolverPar
     ChIterativeSolverParallelNSC(ChParallelDataManager* dc) : ChIterativeSolverParallel(dc) {}
 
     virtual void RunTimeStep();
+	virtual void RunTimeStep_computeForce() {}
+	virtual void RunTimeStep_update() {}
     virtual void ComputeImpulses();
 
     ///< Compute the constraint Jacobian matrix.
@@ -95,6 +100,9 @@ class CH_PARALLEL_API ChIterativeSolverParallelSMC : public ChIterativeSolverPar
     ChIterativeSolverParallelSMC(ChParallelDataManager* dc) : ChIterativeSolverParallel(dc) {}
 
     virtual void RunTimeStep();
+	virtual void RunTimeStep_computeForce();
+	virtual void RunTimeStep_update();
+
     virtual void ComputeImpulses();
 
     ///< Compute the constraint Jacobian matrix.

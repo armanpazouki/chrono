@@ -55,6 +55,18 @@ class CH_PARALLEL_API ChSystemParallel : public ChSystem {
     ChSystemParallel(const ChSystemParallel& other);
     ~ChSystemParallel();
 
+	void IncrementPosition_DataManager(
+		const custom_vector<real3> & pos_rigid_old,
+		const custom_vector<quaternion> & rot_rigid_old,
+		DynamicVector<real>& velocities,
+		real dT);
+	void RunCollision();
+	void RunCollisionUpdate_SemiEuler();
+	void RunCollisionUpdate_Euler();
+	void RunCollisionUpdate_RK2();
+	void RunCollisionUpdate_RK4();
+	virtual bool Integrate_Y0(); // a copy of the original integrator
+
     virtual bool Integrate_Y() override;
     virtual void AddBody(std::shared_ptr<ChBody> newbody) override;
     virtual void AddOtherPhysicsItem(std::shared_ptr<ChPhysicsItem> newitem) override;
