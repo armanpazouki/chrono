@@ -209,6 +209,8 @@ int main(int argc, char* argv[]) {
     double throttle_input;
     double steering_input;
     double braking_input;
+	double angle_output[3];
+	double angle_outputt[3];
 
     // Number of simulation steps between two 3D view render frames
     int render_steps = (int)std::ceil(render_step_size / step_size);
@@ -309,6 +311,22 @@ int main(int argc, char* argv[]) {
 
         // Increment frame number
         step_number++;
+		angle_output[0] = vehicle.GetVehicleRot().e0();
+		angle_output[1] = vehicle.GetVehicleRot().e1();
+		angle_output[2] = vehicle.GetVehicleRot().e2();
+		angle_output[3] = vehicle.GetVehicleRot().e3();
+		angle_outputt[0] = 2*acos(angle_output[0]);
+		angle_outputt[1] = 2*asin(angle_output[1]);
+		angle_outputt[2] = 2*asin(angle_output[2]);
+		angle_outputt[3] = 2*asin(angle_output[3]);
+
+		std::cout << angle_outputt[0] << " ";
+		std::cout << angle_outputt[1] << " ";
+		std::cout << angle_outputt[2] << " ";
+		std::cout << angle_outputt[3] << " ";
+		std::cout << std::endl;
+
+
     }
 
 #else

@@ -95,13 +95,50 @@ bool ChIrrGuiDriver::OnEvent(const SEvent& event) {
             return true;
         }
 
-        m_dT = 0;
+		m_dT = 0;
+		//For Wheel Set using a G25 Logitech wheel set with pedals and shifter
+		double th = event.JoystickEvent.Axis[SEvent::SJoystickEvent::AXIS_Y] + SHRT_MAX; //GOOD
+		double br = event.JoystickEvent.Axis[SEvent::SJoystickEvent::AXIS_U] + SHRT_MAX; //GOOD
+		double new_steering = (double)event.JoystickEvent.Axis[SEvent::SJoystickEvent::AXIS_X] / SHRT_MAX; //Good
+		double new_throttle = (2 * SHRT_MAX - th) / (2 * SHRT_MAX);
+		double new_braking = (2 * SHRT_MAX - br) / (2 * SHRT_MAX);
 
-        double th = event.JoystickEvent.Axis[SEvent::SJoystickEvent::AXIS_Z] + SHRT_MAX;
-        double br = event.JoystickEvent.Axis[SEvent::SJoystickEvent::AXIS_R] + SHRT_MAX;
+		if (m_steering != new_steering)
+			SetSteering(new_steering);
+		if (m_throttle != new_throttle)
+			SetThrottle(new_throttle);
+		if (m_braking != new_braking)
+			SetBraking(new_braking);
+
+		// This entire if statement needs change
+		if (event.JoystickEvent.Axis[SEvent::SJoystickEvent::AXIS_Y] != SHRT_MAX) {
+			//SetThrottle(0);
+			/// Gear is set to reverse
+			if (event.JoystickEvent.IsButtonPressed(9)) {
+				m_app.m_powertrain->SetDriveMode(ChPowertrain::REVERSE);
+
+			}
+			else if (event.JoystickEvent.IsButtonPressed(10) || event.JoystickEvent.IsButtonPressed(11) ||
+				event.JoystickEvent.IsButtonPressed(12) || event.JoystickEvent.IsButtonPressed(13)) {
+				// All 'forward' gears set drive mode to forward, regardless of gear
+				m_app.m_powertrain->SetDriveMode(ChPowertrain::FORWARD);
+			}
+			else {
+				m_app.m_powertrain->SetDriveMode(ChPowertrain::NEUTRAL);
+			}
+		}
+
+		return true;
+
+
+		//For using PS4 controller. Uncomment to activate
+        /*m_dT = 0;
+
+        double th = event.JoystickEvent.Axis[SEvent::SJoystickEvent::AXIS_U] - SHRT_MAX;
+		double br = event.JoystickEvent.Axis[SEvent::SJoystickEvent::AXIS_R] - SHRT_MAX;
         double new_steering = (double)event.JoystickEvent.Axis[SEvent::SJoystickEvent::AXIS_X] / SHRT_MAX;
-        double new_throttle = (2 * SHRT_MAX - th) / (2 * SHRT_MAX);
-        double new_braking = (2 * SHRT_MAX - br) / (2 * SHRT_MAX);
+        double new_throttle = (2 * SHRT_MAX + th) / (2 * SHRT_MAX);
+        double new_braking = (2 * SHRT_MAX + br) / (2 * SHRT_MAX);
 
         if (m_steering != new_steering)
             SetSteering(new_steering);
@@ -110,6 +147,7 @@ bool ChIrrGuiDriver::OnEvent(const SEvent& event) {
         if (m_braking != new_braking)
             SetBraking(new_braking);
 
+		// This entire if statement needs change
         if (event.JoystickEvent.Axis[SEvent::SJoystickEvent::AXIS_Y] != SHRT_MAX) {
             SetThrottle(0);
             /// Gear is set to reverse
@@ -126,7 +164,7 @@ bool ChIrrGuiDriver::OnEvent(const SEvent& event) {
             }
         }
 
-        return true;
+        return true;*/
     }
 
     /// Only interpret keyboard inputs.
