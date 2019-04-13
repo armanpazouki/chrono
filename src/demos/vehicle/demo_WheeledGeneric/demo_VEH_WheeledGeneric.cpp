@@ -37,6 +37,11 @@
 #include "chrono_models/vehicle/generic/Generic_SimplePowertrain.h"
 #include "chrono_models/vehicle/generic/Generic_RigidTire.h"
 #include "chrono_models/vehicle/generic/Generic_FuncDriver.h"
+#include "Serial.h"
+#include <iostream>
+#include <stdio.h>
+#include <tchar.h>
+#include <string>
 
 // If Irrlicht support is available...
 #ifdef CHRONO_IRRLICHT
@@ -209,8 +214,16 @@ int main(int argc, char* argv[]) {
     double throttle_input;
     double steering_input;
     double braking_input;
+
+	Serial* SP = new Serial("\\\\.\\COM3");
+
+	if (SP->IsConnected())
+		printf("We're connected\n");
+
+	DWORD bytesSend;
 	double angle_output[3];
-	double angle_outputt[3];
+	int angle_outputt[3];
+	int valueToArduino;
 
     // Number of simulation steps between two 3D view render frames
     int render_steps = (int)std::ceil(render_step_size / step_size);
@@ -225,193 +238,205 @@ int main(int argc, char* argv[]) {
 #ifdef USE_IRRLICHT
 
     ChRealtimeStepTimer realtime_timer;
+	/* Loop */
+	while (SP->IsConnected()) {
+	while (app.GetDevice()->run()) {
+		// Render scene
+		if (step_number % render_steps == 0) {
+			// Update the position of the shadow mapping so that it follows the car
+			////if (do_shadows) {
+			////  ChVector<> lightaim = vehicle.GetChassisPos();
+			////  ChVector<> lightpos = vehicle.GetChassisPos() + ChVector<>(10, 30, 60);
+			////  irr::core::vector3df mlightpos((irr::f32)lightpos.x, (irr::f32)lightpos.y, (irr::f32)lightpos.z);
+			////  irr::core::vector3df mlightaim((irr::f32)lightaim.x, (irr::f32)lightaim.y, (irr::f32)lightaim.z);
+			////  application.GetEffects()->getShadowLight(0).setPosition(mlightpos);
+			////  application.GetEffects()->getShadowLight(0).setTarget(mlightaim);
+			////  mlight->setPosition(mlightpos);
+			////}
 
-    while (app.GetDevice()->run()) {
-        // Render scene
-        if (step_number % render_steps == 0) {
-            // Update the position of the shadow mapping so that it follows the car
-            ////if (do_shadows) {
-            ////  ChVector<> lightaim = vehicle.GetChassisPos();
-            ////  ChVector<> lightpos = vehicle.GetChassisPos() + ChVector<>(10, 30, 60);
-            ////  irr::core::vector3df mlightpos((irr::f32)lightpos.x, (irr::f32)lightpos.y, (irr::f32)lightpos.z);
-            ////  irr::core::vector3df mlightaim((irr::f32)lightaim.x, (irr::f32)lightaim.y, (irr::f32)lightaim.z);
-            ////  application.GetEffects()->getShadowLight(0).setPosition(mlightpos);
-            ////  application.GetEffects()->getShadowLight(0).setTarget(mlightaim);
-            ////  mlight->setPosition(mlightpos);
-            ////}
-
-            // Draw all scene elements
-            app.BeginScene(true, true, irr::video::SColor(255, 140, 161, 192));
-            app.DrawAll();
-            app.EndScene();
-        }
+			// Draw all scene elements
+			app.BeginScene(true, true, irr::video::SColor(255, 140, 161, 192));
+			app.DrawAll();
+			app.EndScene();
+		}
 
 #ifdef DEBUG_LOG
-        if (step_number % output_steps == 0) {
-            GetLog() << "\n\n============ System Information ============\n";
-            GetLog() << "Time = " << time << "\n\n";
-            vehicle.DebugLog(DBG_SPRINGS | DBG_SHOCKS | DBG_CONSTRAINTS);
-        }
+		if (step_number % output_steps == 0) {
+			GetLog() << "\n\n============ System Information ============\n";
+			GetLog() << "Time = " << time << "\n\n";
+			vehicle.DebugLog(DBG_SPRINGS | DBG_SHOCKS | DBG_CONSTRAINTS);
+		}
 #endif
 
-        // Collect output data from modules (for inter-module communication)
-        throttle_input = driver.GetThrottle();
-        steering_input = driver.GetSteering();
-        braking_input = driver.GetBraking();
+		// Collect output data from modules (for inter-module communication)
+		throttle_input = driver.GetThrottle();
+		steering_input = driver.GetSteering();
+		braking_input = driver.GetBraking();
 
-        powertrain_torque = powertrain.GetOutputTorque();
+		powertrain_torque = powertrain.GetOutputTorque();
 
-        tire_forces[FRONT_LEFT.id()] = tire_front_left.GetTireForce();
-        tire_forces[FRONT_RIGHT.id()] = tire_front_right.GetTireForce();
-        tire_forces[REAR_LEFT.id()] = tire_rear_left.GetTireForce();
-        tire_forces[REAR_RIGHT.id()] = tire_rear_right.GetTireForce();
+		tire_forces[FRONT_LEFT.id()] = tire_front_left.GetTireForce();
+		tire_forces[FRONT_RIGHT.id()] = tire_front_right.GetTireForce();
+		tire_forces[REAR_LEFT.id()] = tire_rear_left.GetTireForce();
+		tire_forces[REAR_RIGHT.id()] = tire_rear_right.GetTireForce();
 
-        driveshaft_speed = vehicle.GetDriveshaftSpeed();
+		driveshaft_speed = vehicle.GetDriveshaftSpeed();
 
-        wheel_states[FRONT_LEFT.id()] = vehicle.GetWheelState(FRONT_LEFT);
-        wheel_states[FRONT_RIGHT.id()] = vehicle.GetWheelState(FRONT_RIGHT);
-        wheel_states[REAR_LEFT.id()] = vehicle.GetWheelState(REAR_LEFT);
-        wheel_states[REAR_RIGHT.id()] = vehicle.GetWheelState(REAR_RIGHT);
+		wheel_states[FRONT_LEFT.id()] = vehicle.GetWheelState(FRONT_LEFT);
+		wheel_states[FRONT_RIGHT.id()] = vehicle.GetWheelState(FRONT_RIGHT);
+		wheel_states[REAR_LEFT.id()] = vehicle.GetWheelState(REAR_LEFT);
+		wheel_states[REAR_RIGHT.id()] = vehicle.GetWheelState(REAR_RIGHT);
 
-        // Update modules (process inputs from other modules)
-        time = vehicle.GetSystem()->GetChTime();
+		// Update modules (process inputs from other modules)
+		time = vehicle.GetSystem()->GetChTime();
 
-        driver.Synchronize(time);
+		driver.Synchronize(time);
 
-        terrain.Synchronize(time);
+		terrain.Synchronize(time);
 
-        tire_front_left.Synchronize(time, wheel_states[FRONT_LEFT.id()], terrain);
-        tire_front_right.Synchronize(time, wheel_states[FRONT_RIGHT.id()], terrain);
-        tire_rear_left.Synchronize(time, wheel_states[REAR_LEFT.id()], terrain);
-        tire_rear_right.Synchronize(time, wheel_states[REAR_RIGHT.id()], terrain);
+		tire_front_left.Synchronize(time, wheel_states[FRONT_LEFT.id()], terrain);
+		tire_front_right.Synchronize(time, wheel_states[FRONT_RIGHT.id()], terrain);
+		tire_rear_left.Synchronize(time, wheel_states[REAR_LEFT.id()], terrain);
+		tire_rear_right.Synchronize(time, wheel_states[REAR_RIGHT.id()], terrain);
 
-        powertrain.Synchronize(time, throttle_input, driveshaft_speed);
+		powertrain.Synchronize(time, throttle_input, driveshaft_speed);
 
-        vehicle.Synchronize(time, steering_input, braking_input, powertrain_torque, tire_forces);
+		vehicle.Synchronize(time, steering_input, braking_input, powertrain_torque, tire_forces);
 
-        app.Synchronize(driver.GetInputModeAsString(), steering_input, throttle_input, braking_input);
+		app.Synchronize(driver.GetInputModeAsString(), steering_input, throttle_input, braking_input);
 
-        // Advance simulation for one timestep for all modules
-        double step = realtime_timer.SuggestSimulationStep(step_size);
+		// Advance simulation for one timestep for all modules
+		double step = realtime_timer.SuggestSimulationStep(step_size);
 
-        driver.Advance(step);
+		driver.Advance(step);
 
-        terrain.Advance(step);
+		terrain.Advance(step);
 
-        tire_front_right.Advance(step);
-        tire_front_left.Advance(step);
-        tire_rear_right.Advance(step);
-        tire_rear_left.Advance(step);
+		tire_front_right.Advance(step);
+		tire_front_left.Advance(step);
+		tire_rear_right.Advance(step);
+		tire_rear_left.Advance(step);
 
-        powertrain.Advance(step);
+		powertrain.Advance(step);
 
-        vehicle.Advance(step);
+		vehicle.Advance(step);
 
-        app.Advance(step);
+		app.Advance(step);
 
-        // Increment frame number
-        step_number++;
+		// Increment frame number
+		step_number++;
+
+		//Outputting the angle of the vehicle
 		angle_output[0] = vehicle.GetVehicleRot().e0();
 		angle_output[1] = vehicle.GetVehicleRot().e1();
 		angle_output[2] = vehicle.GetVehicleRot().e2();
 		angle_output[3] = vehicle.GetVehicleRot().e3();
-		angle_outputt[0] = 2*acos(angle_output[0]);
-		angle_outputt[1] = 2*asin(angle_output[1]);
-		angle_outputt[2] = 2*asin(angle_output[2]);
-		angle_outputt[3] = 2*asin(angle_output[3]);
+		angle_outputt[0] = 2 * acos(angle_output[0]) * 10000;
+		angle_outputt[1] = 2 * asin(angle_output[1]) * 10000;
+		angle_outputt[2] = 2 * asin(angle_output[2]) * 10000;
+		angle_outputt[3] = 2 * asin(angle_output[3]) * 10000;
 
-		std::cout << angle_outputt[0] << " ";
+		//Angle output value that will be ssent to the Arduino
+		valueToArduino = angle_outputt[1];
+
+		/* Send Arduino */
+		BOOL retVal = WriteFile(SP->hSerial, &valueToArduino, sizeof(valueToArduino), &bytesSend, NULL);
+
+		/* I have no idea what is this for? (SP->status.cbInQue) */
+		ClearCommError(SP->hSerial, &SP->errors, &SP->status);
+
+		//std::cout << angle_outputt[0] << " ";
 		std::cout << angle_outputt[1] << " ";
 		std::cout << angle_outputt[2] << " ";
-		std::cout << angle_outputt[3] << " ";
+		//std::cout << angle_outputt[3] << " ";
 		std::cout << std::endl;
 
 
-    }
+		}
 
 #else
 
-    int render_frame = 0;
+	int render_frame = 0;
 
-    if (ChFileutils::MakeDirectory(out_dir.c_str()) < 0) {
-        std::cout << "Error creating directory " << out_dir << std::endl;
-        return 1;
-    }
-    if (ChFileutils::MakeDirectory(pov_dir.c_str()) < 0) {
-        std::cout << "Error creating directory " << pov_dir << std::endl;
-        return 1;
-    }
+	if (ChFileutils::MakeDirectory(out_dir.c_str()) < 0) {
+		std::cout << "Error creating directory " << out_dir << std::endl;
+		return 1;
+	}
+	if (ChFileutils::MakeDirectory(pov_dir.c_str()) < 0) {
+		std::cout << "Error creating directory " << pov_dir << std::endl;
+		return 1;
+	}
 
-    char filename[100];
+	char filename[100];
 
-    while (time < tend) {
-        if (step_number % render_steps == 0) {
-            // Output render data
-            sprintf(filename, "%s/data_%03d.dat", pov_dir.c_str(), render_frame + 1);
-            utils::WriteShapesPovray(vehicle.GetSystem(), filename);
-            std::cout << "Output frame:   " << render_frame << std::endl;
-            std::cout << "Sim frame:      " << step_number << std::endl;
-            std::cout << "Time:           " << time << std::endl;
-            std::cout << "             throttle: " << driver.GetThrottle() << " steering: " << driver.GetSteering()
-                      << std::endl;
-            std::cout << std::endl;
-            render_frame++;
-        }
+	while (time < tend) {
+		if (step_number % render_steps == 0) {
+			// Output render data
+			sprintf(filename, "%s/data_%03d.dat", pov_dir.c_str(), render_frame + 1);
+			utils::WriteShapesPovray(vehicle.GetSystem(), filename);
+			std::cout << "Output frame:   " << render_frame << std::endl;
+			std::cout << "Sim frame:      " << step_number << std::endl;
+			std::cout << "Time:           " << time << std::endl;
+			std::cout << "             throttle: " << driver.GetThrottle() << " steering: " << driver.GetSteering()
+				<< std::endl;
+			std::cout << std::endl;
+			render_frame++;
+		}
 
-        // Collect output data from modules (for inter-module communication)
-        throttle_input = driver.GetThrottle();
-        steering_input = driver.GetSteering();
-        braking_input = driver.GetBraking();
+		// Collect output data from modules (for inter-module communication)
+		throttle_input = driver.GetThrottle();
+		steering_input = driver.GetSteering();
+		braking_input = driver.GetBraking();
 
-        powertrain_torque = powertrain.GetOutputTorque();
+		powertrain_torque = powertrain.GetOutputTorque();
 
-        tire_forces[FRONT_LEFT.id()] = tire_front_left.GetTireForce();
-        tire_forces[FRONT_RIGHT.id()] = tire_front_right.GetTireForce();
-        tire_forces[REAR_LEFT.id()] = tire_rear_left.GetTireForce();
-        tire_forces[REAR_RIGHT.id()] = tire_rear_right.GetTireForce();
+		tire_forces[FRONT_LEFT.id()] = tire_front_left.GetTireForce();
+		tire_forces[FRONT_RIGHT.id()] = tire_front_right.GetTireForce();
+		tire_forces[REAR_LEFT.id()] = tire_rear_left.GetTireForce();
+		tire_forces[REAR_RIGHT.id()] = tire_rear_right.GetTireForce();
 
-        driveshaft_speed = vehicle.GetDriveshaftSpeed();
+		driveshaft_speed = vehicle.GetDriveshaftSpeed();
 
-        wheel_states[FRONT_LEFT.id()] = vehicle.GetWheelState(FRONT_LEFT);
-        wheel_states[FRONT_RIGHT.id()] = vehicle.GetWheelState(FRONT_RIGHT);
-        wheel_states[REAR_LEFT.id()] = vehicle.GetWheelState(REAR_LEFT);
-        wheel_states[REAR_RIGHT.id()] = vehicle.GetWheelState(REAR_RIGHT);
+		wheel_states[FRONT_LEFT.id()] = vehicle.GetWheelState(FRONT_LEFT);
+		wheel_states[FRONT_RIGHT.id()] = vehicle.GetWheelState(FRONT_RIGHT);
+		wheel_states[REAR_LEFT.id()] = vehicle.GetWheelState(REAR_LEFT);
+		wheel_states[REAR_RIGHT.id()] = vehicle.GetWheelState(REAR_RIGHT);
 
-        // Update modules (process inputs from other modules)
-        time = vehicle.GetSystem()->GetChTime();
+		// Update modules (process inputs from other modules)
+		time = vehicle.GetSystem()->GetChTime();
 
-        driver.Synchronize(time);
+		driver.Synchronize(time);
 
-        terrain.Synchronize(time);
+		terrain.Synchronize(time);
 
-        tire_front_left.Synchronize(time, wheel_states[FRONT_LEFT.id()], terrain);
-        tire_front_right.Synchronize(time, wheel_states[FRONT_RIGHT.id()], terrain);
-        tire_rear_left.Synchronize(time, wheel_states[REAR_LEFT.id()], terrain);
-        tire_rear_right.Synchronize(time, wheel_states[REAR_RIGHT.id()], terrain);
+		tire_front_left.Synchronize(time, wheel_states[FRONT_LEFT.id()], terrain);
+		tire_front_right.Synchronize(time, wheel_states[FRONT_RIGHT.id()], terrain);
+		tire_rear_left.Synchronize(time, wheel_states[REAR_LEFT.id()], terrain);
+		tire_rear_right.Synchronize(time, wheel_states[REAR_RIGHT.id()], terrain);
 
-        powertrain.Synchronize(time, throttle_input, driveshaft_speed);
+		powertrain.Synchronize(time, throttle_input, driveshaft_speed);
 
-        vehicle.Synchronize(time, steering_input, braking_input, powertrain_torque, tire_forces);
+		vehicle.Synchronize(time, steering_input, braking_input, powertrain_torque, tire_forces);
 
-        // Advance simulation for one timestep for all modules
-        driver.Advance(step_size);
+		// Advance simulation for one timestep for all modules
+		driver.Advance(step_size);
 
-        terrain.Advance(step_size);
+		terrain.Advance(step_size);
 
-        tire_front_right.Advance(step_size);
-        tire_front_left.Advance(step_size);
-        tire_rear_right.Advance(step_size);
-        tire_rear_left.Advance(step_size);
+		tire_front_right.Advance(step_size);
+		tire_front_left.Advance(step_size);
+		tire_rear_right.Advance(step_size);
+		tire_rear_left.Advance(step_size);
 
-        powertrain.Advance(step_size);
+		powertrain.Advance(step_size);
 
-        vehicle.Advance(step_size);
+		vehicle.Advance(step_size);
 
-        // Increment frame number
-        step_number++;
-    }
+		// Increment frame number
+		step_number++;
+	}
 
 #endif
-
+	}
     return 0;
 }
